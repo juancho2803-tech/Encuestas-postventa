@@ -689,7 +689,7 @@ select{font-family:inherit;cursor:pointer}
       <button class="btn btn-secondary" onclick="document.getElementById('upload-csv').click()" style="padding:5px 12px;font-size:11px;display:flex;align-items:center;gap:5px">
         📊 <span>Encuestas</span>
       </button>
-      <button class="btn btn-secondary" onclick="if(confirm('Esto borra todos los datos actuales y deja el programa listo para cargar la base desde cero. ¿Continuar?')){clearBase();}" title="Borrar todo y cargar base nueva" style="padding:5px 10px;font-size:11px;background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.35);color:#f87171">
+      <button class="btn btn-secondary" onclick="openPIN('reset')" title="Borrar todo y cargar base nueva" style="padding:5px 10px;font-size:11px;background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.35);color:#f87171">
         🗑 Reset
       </button>
       <div id="csv-status" class="upload-status" style="display:none"></div>
@@ -1489,6 +1489,7 @@ function expand(mes,label,taller,asesor,tipo,estado,score,n){
     estado,          // 'COMPLETADA' | 'SIN CONTACTO'
     score: score,    // 1-5 | null
     managed: false,  // set to true after gestión module processes it
+    isSeed: true,    // placeholder — se elimina al cargar un CSV real
   }));
 }
 
@@ -2138,15 +2139,30 @@ let gLog = [];
 
 // ─── PIN ─────────────────────────────────────────────────────────────
 let pinBuffer = '';
+let pinMode = 'gestion'; // 'gestion' | 'reset'
 const PIN_LOCAL_KEY = 'priv_pin_v1';
 
 function getPinLocal(){ return localStorage.getItem(PIN_LOCAL_KEY)||'1234'; }
 function setPinLocal(p){ localStorage.setItem(PIN_LOCAL_KEY, p); }
 
-function openPIN(){
+function openPIN(mode){
+  pinMode = mode||'gestion';
   pinBuffer='';
-  pinVerifying=false;  // siempre resetear al abrir
+  pinVerifying=false;
   renderPinDots('neutral');
+  // Adapt modal text to context
+  const title=document.querySelector('#pin-overlay .pin-title');
+  const sub=document.querySelector('#pin-overlay .pin-sub');
+  const icon=document.querySelector('#pin-overlay .pin-icon');
+  if(pinMode==='reset'){
+    if(icon) icon.textContent='⚠️';
+    if(title) title.textContent='Confirmar reset';
+    if(sub) sub.textContent='Ingresá el PIN para borrar la base';
+  } else {
+    if(icon) icon.textContent='🔐';
+    if(title) title.textContent='Módulo privado';
+    if(sub) sub.textContent='Ingresá tu PIN de acceso';
+  }
   document.getElementById('pin-overlay').classList.add('open');
 }
 function closePIN(){
@@ -2184,7 +2200,10 @@ function renderPinDots(state){
 function pinSuccess(){
   pinBuffer='';
   for(let i=0;i<4;i++){ const d=document.getElementById('pd'+i); if(d) d.style.background=''; }
-  closePIN(); openGestion();
+  const mode=pinMode;
+  closePIN();
+  if(mode==='reset') clearBase();
+  else openGestion();
 }
 function pinFail(){
   for(let i=0;i<4;i++){ const d=document.getElementById('pd'+i); if(d) d.style.background=''; }
@@ -3455,6 +3474,22 @@ function processCSV(text, filename){
     setUploadStatus('csv-status','✗ No se encontraron columnas requeridas','err');
     return;
   }
+
+  // ── FIX: eliminar datos semilla antes de procesar CSV real ────────
+  // Los registros isSeed tienen IDs secuenciales (R1, R2…) que NUNCA
+  // coinciden con IDs reales del CSV (R697xxx…), causando que el total
+  // superara el número real de encuestas.
+  const seedCount = DB.filter(r=>r.isSeed).length;
+  if(seedCount>0){
+    for(let i=DB.length-1;i>=0;i--){
+      if(DB[i].isSeed) DB.splice(i,1);
+    }
+    // Limpiar también SC_REAL de registros semilla (no tienen orden real)
+    for(let i=SC_REAL.length-1;i>=0;i--){
+      if(SC_REAL[i].isSeed) SC_REAL.splice(i,1);
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────
 
   let added=0, updated=0, skipped=0;
   const existingIds=new Set(DB.map(r=>r.id));
