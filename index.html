@@ -705,30 +705,7 @@ select{font-family:inherit;cursor:pointer}
 
   <div class="body-area">
   <!-- ── SIDEBAR ───────────────────────────────────────────────── -->
-  <aside class="sidebar" id="main-sidebar">
-    <div class="sidebar-heading">Período activo</div>
-    <div class="skpi skpi-violet" style="animation-delay:.06s">
-      <div class="skpi-glow"></div>
-      <div class="skpi-icon">📨</div>
-      <div class="skpi-label">Encuestas Generadas</div>
-      <div class="skpi-value" id="s-generadas">—</div>
-      <div class="skpi-sub" id="s-gen-sub">Enviadas</div>
-    </div>
-    <div class="skpi skpi-green" style="animation-delay:.12s">
-      <div class="skpi-glow"></div>
-      <div class="skpi-icon">✅</div>
-      <div class="skpi-label">Respondidas</div>
-      <div class="skpi-value" id="s-respondidas">—</div>
-      <div class="skpi-sub" id="s-resp-sub">Completadas</div>
-    </div>
-    <div class="skpi skpi-red" style="animation-delay:.18s">
-      <div class="skpi-glow"></div>
-      <div class="skpi-icon">⚠️</div>
-      <div class="skpi-label">Reclamos</div>
-      <div class="skpi-value" id="s-reclamos">—</div>
-      <div class="skpi-sub">Del archivo Excel</div>
-    </div>
-  </aside>
+  <!-- sidebar removida -->
   <!-- ── MAIN ──────────────────────────────────────────────────── -->
   <main class="main-content">
 
@@ -1160,6 +1137,7 @@ select{font-family:inherit;cursor:pointer}
       </div>
       <button class="gestion-close" onclick="closeGestion()">×</button>
     </div>
+    <div id="sheets-status-badge" style="display:none;font-size:10px;font-family:'JetBrains Mono',monospace;padding:4px 16px;border-bottom:1px solid var(--border);transition:color .3s"></div>
 
     <div class="gestion-body">
 
@@ -1534,20 +1512,231 @@ async function sheetsGET(params){
   });
 }
 
+// ─── SHEETS POST LARGE — usa fetch POST real para payloads grandes ──
+async function sheetsPostLarge(action, jsonBody){
+  const url = APPS_SCRIPT_URL + '?action=' + encodeURIComponent(action);
+  await fetch(url, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {'Content-Type': 'text/plain'},
+    body: jsonBody
+  });
+}
+
+// ─── GUARDAR ENCUESTAS + SC_REAL EN SHEETS ───────────────────────────
+async function saveEncuestasToSheets(){
+  showSheetsStatus('💾 Guardando encuestas en Sheets…', 'saving');
+  const encData = DB.map(r=>({
+    id:r.id||'', mes:r.mes||'', label:r.label||'', taller:r.taller||'',
+    asesor:r.asesor||'', tipo:r.tipo||'', estado:r.estado||'',
+    score:r.score??null, npsCat:r.npsCat||null, managed:r.managed||false
+  }));
+  const scData = SC_REAL.map(r=>({
+    id:r.id||'', orden:r.orden||'', cliente:r.cliente||'',
+    asesor:r.asesor||'', taller:r.taller||'', mes:r.mes||'',
+    label:r.label||'', tipo:r.tipo||'', managed:r.managed||false
+  }));
+  try{
+    await sheetsPostLarge('saveEncuestas', JSON.stringify({encuestas:encData, sc_real:scData}));
+    showSheetsStatus('✅ Encuestas guardadas en Sheets ('+encData.length+' registros)', 'ok');
+    console.log('saveEncuestas enviado →', encData.length, 'registros,', scData.length, 'sin contacto');
+  }catch(e){
+    showSheetsStatus('❌ Error al guardar encuestas: '+e.message, 'error');
+    console.warn('saveEncuestasToSheets error:', e);
+  }
+}
+
+// ─── GUARDAR RECLAMOS EN SHEETS ──────────────────────────────────────
+async function saveReclamosToSheets(){
+  showSheetsStatus('💾 Guardando reclamos en Sheets…', 'saving');
+  const data = RECLAMOS_DATA.map(r=>({
+    orden:r.orden||'', cliente:r.cliente||'', asesor:r.asesor||'',
+    taller:r.taller||'', mes:r.mes||'', label:r.label||'',
+    dominio:r.dominio||'', fecha_reclamo:r.fecha_reclamo||'',
+    verbatim:r.verbatim||'', score:r.score??null,
+    tipologia:r.tipologia||'', subtipologia:r.subtipologia||'',
+    area:r.area||'', etapa:r.etapa||'', causa_raiz:r.causa_raiz||'',
+    conf_or:r.conf_or||'',
+    tiene_comentario:r.tiene_comentario||false,
+    en_excel:r.en_excel||false,
+    estado_encuesta:r.estado_encuesta||'',
+    es_sin_contacto:r.es_sin_contacto||false
+  }));
+  try{
+    await sheetsPostLarge('saveReclamos', JSON.stringify(data));
+    showSheetsStatus('✅ Reclamos guardados en Sheets ('+data.length+')', 'ok');
+    console.log('saveReclamos enviado →', data.length, 'registros');
+  }catch(e){
+    showSheetsStatus('❌ Error al guardar reclamos: '+e.message, 'error');
+    console.warn('saveReclamosToSheets error:', e);
+  }
+}
+
+// ─── GUARDAR/RESTAURAR ENCUESTAS EN localStorage (primario) ──────────
+function saveEncuestasLocal(){
+  try{
+    const encData = DB.filter(r=>!r.isSeed).map(r=>({
+      id:r.id, mes:r.mes, label:r.label||'', taller:r.taller||'',
+      asesor:r.asesor||'', tipo:r.tipo||'', estado:r.estado||'',
+      score:r.score??null, npsCat:r.npsCat||null, managed:r.managed||false
+    }));
+    const scData = SC_REAL.filter(r=>!r.isSeed).map(r=>({
+      id:r.id, orden:r.orden||'', cliente:r.cliente||'',
+      asesor:r.asesor||'', taller:r.taller||'', mes:r.mes||'',
+      label:r.label||'', tipo:r.tipo||'', managed:r.managed||false
+    }));
+    localStorage.setItem('encuestas_data_v1', JSON.stringify(encData));
+    localStorage.setItem('sc_real_data_v1',   JSON.stringify(scData));
+    console.log('Encuestas guardadas en localStorage:', encData.length, 'registros');
+    setUploadStatus('csv-status',
+      `✓ ${encData.length} registros guardados localmente — recargá la página para verificar`, 'ok');
+  }catch(e){
+    console.warn('saveEncuestasLocal error:', e);
+    setUploadStatus('csv-status', '⚠️ Error al guardar en memoria local: '+e.message, 'error');
+  }
+}
+
+function restoreEncuestasLocal(){
+  try{
+    const encStr = localStorage.getItem('encuestas_data_v1');
+    if(!encStr){
+      // Sin datos locales — mostrar advertencia visible
+      setTimeout(()=>setUploadStatus('csv-status','⚠️ Sin datos guardados — subí tu CSV','warn'),200);
+      return false;
+    }
+    const encData = JSON.parse(encStr);
+    if(!encData || !encData.length){
+      setTimeout(()=>setUploadStatus('csv-status','⚠️ Memoria local vacía — subí tu CSV','warn'),200);
+      return false;
+    }
+    // Limpiar TODA la DB (seed + cualquier dato previo) y cargar localStorage
+    DB.length = 0;
+    SC_REAL.length = 0;
+    encData.forEach(r=>DB.push(r));
+    const scStr = localStorage.getItem('sc_real_data_v1');
+    if(scStr){
+      try{ JSON.parse(scStr).forEach(r=>SC_REAL.push(r)); }catch(e){}
+    }
+    console.log('Encuestas restauradas desde localStorage:', encData.length, 'registros');
+    setTimeout(()=>setUploadStatus('csv-status',
+      `📂 Cargado desde memoria local: ${encData.length} registros`, 'ok'),200);
+    return true;
+  }catch(e){
+    console.warn('restoreEncuestasLocal error:', e);
+    setTimeout(()=>setUploadStatus('csv-status','⚠️ Error al leer memoria local: '+e.message,'error'),200);
+    return false;
+  }
+}
+
+// ─── GUARDAR/RESTAURAR RECLAMOS EN localStorage (primario) ───────────
+function saveReclamosLocal(){
+  try{
+    const data = RECLAMOS_DATA.map(r=>({
+      orden:r.orden||'', cliente:r.cliente||'', asesor:r.asesor||'',
+      taller:r.taller||'', mes:r.mes||'', label:r.label||'',
+      dominio:r.dominio||'', fecha_reclamo:r.fecha_reclamo||'',
+      verbatim:r.verbatim||'', score:r.score??null,
+      tipologia:r.tipologia||'', subtipologia:r.subtipologia||'',
+      area:r.area||'', etapa:r.etapa||'', causa_raiz:r.causa_raiz||'',
+      conf_or:r.conf_or||'',
+      tiene_comentario:r.tiene_comentario||false,
+      en_excel:r.en_excel||false,
+      estado_encuesta:r.estado_encuesta||'',
+      es_sin_contacto:r.es_sin_contacto||false
+    }));
+    localStorage.setItem('reclamos_data_v1', JSON.stringify(data));
+    console.log('Reclamos guardados en localStorage:', data.length, 'registros');
+  }catch(e){ console.warn('saveReclamosLocal error:', e); }
+}
+
+function restoreReclamosLocal(){
+  try{
+    const str = localStorage.getItem('reclamos_data_v1');
+    if(!str) return false;
+    const data = JSON.parse(str);
+    if(!data || !data.length) return false;
+    RECLAMOS_DATA.length = 0;
+    data.forEach(r=>RECLAMOS_DATA.push(r));
+    console.log('Reclamos restaurados desde localStorage:', data.length, 'registros');
+    return true;
+  }catch(e){ console.warn('restoreReclamosLocal error:', e); return false; }
+}
+
+// ─── CARGAR ENCUESTAS DESDE SHEETS AL INICIO ─────────────────────────
+async function loadEncuestasFromSheets(){
+  try{
+    const data = await sheetsGET({action:'getEncuestas'});
+    if(!data.ok || !data.encuestas || !data.encuestas.length) return;
+    // Limpiar seed antes de cargar datos reales de Sheets
+    for(let i=DB.length-1;i>=0;i--){ if(DB[i].isSeed) DB.splice(i,1); }
+    for(let i=SC_REAL.length-1;i>=0;i--){ if(SC_REAL[i].isSeed) SC_REAL.splice(i,1); }
+    // Solo cargar si DB está vacío (no subieron CSV en esta sesión)
+    if(DB.length===0){
+      data.encuestas.forEach(r=>DB.push(r));
+      if(data.sc_real && data.sc_real.length){
+        const existIds=new Set(SC_REAL.map(r=>r.id));
+        data.sc_real.forEach(r=>{ if(!existIds.has(r.id)) SC_REAL.push(r); });
+      }
+      // Re-aplicar cambios gestionados sobre los datos recargados
+      try{
+        const local=JSON.parse(localStorage.getItem('db_changes_v1')||'{}');
+        const scLocal=JSON.parse(localStorage.getItem('sc_managed_v1')||'{}');
+        DB.forEach(r=>{ const c=local[r.id]; if(c){r.estado=c.estado;r.score=c.score;r.managed=c.managed||false;} });
+        SC_REAL.forEach(r=>{ if(scLocal[r.id]) r.managed=true; });
+      }catch(e){}
+      recomputeFromDB();
+      render();
+      console.log('Encuestas cargadas desde Sheets:', data.encuestas.length, 'registros');
+    }
+  }catch(e){
+    console.warn('loadEncuestasFromSheets no disponible:', e.message);
+  }
+}
+
+// ─── CARGAR RECLAMOS DESDE SHEETS AL INICIO ──────────────────────────
+async function loadReclamosFromSheets(){
+  try{
+    const data = await sheetsGET({action:'getReclamos'});
+    if(!data.ok || !data.reclamos || !data.reclamos.length) return;
+    if(RECLAMOS_DATA.length===0){
+      data.reclamos.forEach(r=>RECLAMOS_DATA.push(r));
+      recomputeFromDB();
+      render();
+      console.log('Reclamos cargados desde Sheets:', data.reclamos.length, 'registros');
+    }
+  }catch(e){
+    console.warn('loadReclamosFromSheets no disponible:', e.message);
+  }
+}
+
+// ─── SHEETS STATUS BADGE ────────────────────────────────────────────
+let _sheetsStatusTimer=null;
+function showSheetsStatus(msg, type='ok'){
+  const el=document.getElementById('sheets-status-badge');
+  if(!el) return;
+  const colors={ok:'#34d399', error:'#f87171', warn:'#fbbf24', saving:'#22d3ee'};
+  el.textContent=msg;
+  el.style.color=colors[type]||colors.ok;
+  el.style.display='block';
+  clearTimeout(_sheetsStatusTimer);
+  if(type==='ok') _sheetsStatusTimer=setTimeout(()=>{ el.style.display='none'; },4000);
+}
+
 async function sheetsPOST(params){
   // JSONP fire & forget
+  showSheetsStatus('💾 Guardando en Sheets…','saving');
   const cbName = '_gw'+Date.now();
   const qs = Object.entries({...params, callback: cbName})
     .map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(String(v))).join('&');
   const script = document.createElement('script');
   script.src = APPS_SCRIPT_URL + '?' + qs;
-  const timer = setTimeout(()=>{ delete window[cbName]; script.remove(); console.warn('sheetsPOST timeout',params.action); }, 15000);
+  const timer = setTimeout(()=>{ delete window[cbName]; script.remove(); console.warn('sheetsPOST timeout',params.action); showSheetsStatus('⚠️ Sheets no respondió — guardado local','warn'); }, 15000);
   window[cbName] = (r)=>{
     clearTimeout(timer); delete window[cbName]; script.remove();
-    if(r&&r.ok) console.log('Sheets write OK:',params.action);
-    else console.warn('Sheets write FAIL:',params.action, r);
+    if(r&&r.ok){ console.log('Sheets write OK:',params.action); showSheetsStatus('✅ Guardado en Sheets','ok'); }
+    else{ console.warn('Sheets write FAIL:',params.action, r); showSheetsStatus('❌ Error al guardar en Sheets','error'); }
   };
-  script.onerror = ()=>{ clearTimeout(timer); delete window[cbName]; script.remove(); console.warn('sheetsPOST error',params.action); };
+  script.onerror = ()=>{ clearTimeout(timer); delete window[cbName]; script.remove(); console.warn('sheetsPOST error',params.action); showSheetsStatus('❌ Error de red al guardar','error'); };
   document.head.appendChild(script);
 }
 
@@ -1732,16 +1921,15 @@ function getReclamosByMes(){
 // Used exclusively for the evolutivo line chart
 function getFullMonthSeries(){
   const recIdx = getReclamosByMes();
-  return MES_ORDER.map(m=>{
-    // For the line chart we use unfiltered DB (all talleres, tipos, asesores)
-    // but we DO respect taller/tipo/asesor filters so the chart reflects context
-    // while always showing every month on the X axis
-    const rows = filterDB({meses:[]});  // override meses to empty = all months
-    const mRows = rows.filter(r=>r.mes===m.mes);
-    const a = calcAgg(mRows);
-    a.reclamos = recIdx[m.mes]||0;
-    return {...m, ...a};
-  }).filter(m=>m.total>0);
+  return MES_ORDER
+    .filter(m=>m.mes>='2026-01')   // solo desde enero 2026 en adelante
+    .map(m=>{
+      const rows = filterDB({meses:[]});
+      const mRows = rows.filter(r=>r.mes===m.mes);
+      const a = calcAgg(mRows);
+      a.reclamos = recIdx[m.mes]||0;
+      return {...m, ...a};
+    }).filter(m=>m.total>0);
 }
 
 // Filtered monthly series (used for KPIs, not for the line chart)
@@ -2285,7 +2473,24 @@ function renderEncList(){
   const list=document.getElementById('enc-list');
   const scoreColors={5:'#34d399',4:'#22d3ee',3:'#fbbf24',2:'#f97316',1:'#f87171'};
   if(!gPool.length){
-    list.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Sin encuestas sin contacto para este filtro</div>';
+    const mes    = document.getElementById('g-mes').value;
+    const taller = document.getElementById('g-taller').value;
+    const gestionadas = SC_REAL.filter(r=>{
+      if(!r.managed) return false;
+      if(mes    && r.mes    !==mes)    return false;
+      if(taller && r.taller !==taller) return false;
+      return true;
+    }).length;
+    const hayGest = gestionadas>0;
+    list.innerHTML=`<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:10px;align-items:center">
+      <div style="font-size:22px">✅</div>
+      <div style="font-weight:600;color:var(--text)">Sin pendientes para este filtro</div>
+      ${hayGest
+        ? `<div style="color:var(--muted2)">${gestionadas} encuesta${gestionadas!==1?'s':''} ya gestionada${gestionadas!==1?'s':''} en sesiones anteriores.</div>
+           <button onclick="liberarGestionadas()" style="margin-top:4px;padding:6px 16px;border-radius:8px;border:1px solid rgba(248,113,113,.4);background:rgba(248,113,113,.08);color:#f87171;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer">🔓 Liberar gestionadas de este filtro</button>`
+        : `<div style="color:var(--muted2)">Cargá la base CSV para ver encuestas sin contacto.</div>`
+      }
+    </div>`;
     updateCountBadge(); return;
   }
   list.innerHTML=gPool.map(e=>{
@@ -2508,7 +2713,9 @@ function aplicarGestion(){
   ids.forEach(id=>{
     const src=SC_REAL.find(r=>r.id===id);
     if(!src)return;
-    const dbRec=DB.find(r=>r.estado==='SIN CONTACTO'&&r.mes===src.mes&&r.taller===src.taller&&r.tipo===src.tipo);
+    // FIX: buscar por ID directo primero (datos CSV), fallback por mes+taller+tipo (datos semilla)
+    const dbRec = DB.find(r=>r.id===id)
+      || DB.find(r=>r.estado==='SIN CONTACTO'&&r.mes===src.mes&&r.taller===src.taller&&r.tipo===src.tipo);
     if(dbRec){
       dbRec.estado='COMPLETADA';
       dbRec.score=npsTo5(gScores[id]||max);
@@ -2540,6 +2747,56 @@ function aplicarGestion(){
   refreshPool();
   renderLog();
   render();
+}
+
+// ─── LIBERAR GESTIONADAS — permite re-gestionar registros del filtro actual ──
+function liberarGestionadas(){
+  const mes    = document.getElementById('g-mes').value;
+  const taller = document.getElementById('g-taller').value;
+  const label  = mes ? (document.querySelector(`#g-mes option[value="${mes}"]`)?.textContent||mes) : 'todos los meses';
+  if(!confirm(`¿Liberar registros gestionados de ${label}${taller?' · '+taller:''}? Esto los vuelve a poner disponibles para gestión.`)) return;
+
+  // Liberar en SC_REAL
+  SC_REAL.forEach(r=>{
+    if(!r.managed) return;
+    if(mes    && r.mes    !==mes)    return;
+    if(taller && r.taller !==taller) return;
+    r.managed=false;
+  });
+
+  // Revertir en DB (volver a SIN CONTACTO los que se hayan cambiado en esta sesión)
+  DB.forEach(r=>{
+    if(!r.managed) return;
+    if(mes    && r.mes    !==mes)    return;
+    if(taller && r.taller !==taller) return;
+    r.managed=false;
+    r.estado='SIN CONTACTO';
+    r.score=null;
+    // Eliminar de localStorage
+    try{
+      const local=JSON.parse(localStorage.getItem('db_changes_v1')||'{}');
+      delete local[r.id];
+      localStorage.setItem('db_changes_v1', JSON.stringify(local));
+    }catch(e){}
+  });
+
+  // Eliminar de sc_managed_v1 localStorage
+  try{
+    const scLocal=JSON.parse(localStorage.getItem('sc_managed_v1')||'{}');
+    SC_REAL.filter(r=>{
+      if(mes    && r.mes    !==mes)    return false;
+      if(taller && r.taller !==taller) return false;
+      return true;
+    }).forEach(r=>{ delete scLocal[r.id]; });
+    localStorage.setItem('sc_managed_v1', JSON.stringify(scLocal));
+  }catch(e){}
+
+  const now=new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  gLog.unshift({ time:now, msg:`Liberados registros de ${label}${taller?' · '+taller:''}. Disponibles para re-gestión.`, tag:'info' });
+  refreshPool();
+  renderLog();
+  render();
+  showSheetsStatus('⚠️ Liberación local — re-guardá en Sheets al finalizar','warn');
 }
 
 // ─── LOG ─────────────────────────────────────────────────────────────
@@ -3599,11 +3856,17 @@ function processCSV(text, filename){
   // Recompute all derived data from DB (idempotent — correct regardless of upload history)
   recomputeFromDB();
 
-  const statusMsg = `✓ +${added} nuevas · ${skipped} ya existían (sin cambios)${dupsRemoved?` · ${dupsRemoved} duplicados eliminados`:''}`;
+  // Resumen detallado post-carga
+  const completadas = DB.filter(r=>r.estado==='COMPLETADA').length;
+  const sinContacto = DB.filter(r=>r.estado==='SIN CONTACTO').length;
+  const statusMsg = `✓ +${added} nuevas · ${skipped} ya existían · Total: ${DB.length} (${completadas} respondidas · ${sinContacto} sin contacto)${dupsRemoved?` · ${dupsRemoved} duplicados eliminados`:''}`;
   setUploadStatus('csv-status', statusMsg, 'ok');
   updateUploadSummary();
   render();
   populateTipologiaSelects();
+  // Guardar en localStorage (inmediato) + Sheets en segundo plano
+  saveEncuestasLocal();
+  saveEncuestasToSheets();
 }
 
 // Rebuilds NPS_DATA, RECLAMOS_POR_MES and MES_ORDER from the in-memory arrays.
@@ -3774,10 +4037,15 @@ function processXLSX(buffer, filename){
     }
   });
 
-  setUploadStatus('xlsx-status',`✓ +${added} nuevos · ${updated} tipologías completadas`,'ok');
+  const conTipologia = RECLAMOS_DATA.filter(r=>r.tipologia).length;
+  const sinTipologia = RECLAMOS_DATA.filter(r=>!r.tipologia).length;
+  setUploadStatus('xlsx-status',`✓ +${added} nuevos · ${updated} actualizados · Total: ${RECLAMOS_DATA.length} reclamos (${conTipologia} tipificados · ${sinTipologia} sin tipificar)`,'ok');
   updateUploadSummary();
   render();
   populateTipologiaSelects();
+  // Guardar en localStorage (inmediato) + Sheets en segundo plano
+  saveReclamosLocal();
+  saveReclamosToSheets();
 }
 
 
@@ -3855,11 +4123,31 @@ filterSubtipologias();
   render();
 })();
 
+// Restaurar bases desde localStorage (primario, inmediato)
+(()=>{
+  const encOk = restoreEncuestasLocal();
+  const recOk = restoreReclamosLocal();
+  if(encOk || recOk){
+    // Re-aplicar cambios gestionados sobre datos restaurados
+    try{
+      const local  = JSON.parse(localStorage.getItem('db_changes_v1')||'{}');
+      const scLocal= JSON.parse(localStorage.getItem('sc_managed_v1')||'{}');
+      DB.forEach(r=>{ const c=local[r.id]; if(c){r.estado=c.estado;r.score=c.score;r.managed=c.managed||false;} });
+      SC_REAL.forEach(r=>{ if(scLocal[r.id]) r.managed=true; });
+    }catch(e){}
+    recomputeFromDB();
+    render();
+  }
+})();
+
 // Sincronizar con Sheets en segundo plano (re-renderiza si hay cambios)
 (async () => {
   try {
     await dbApplyChanges();
     await grLoadFromSheets();
+    // Solo intentar Sheets si localStorage no tenía datos
+    if(!localStorage.getItem('encuestas_data_v1')) await loadEncuestasFromSheets();
+    if(!localStorage.getItem('reclamos_data_v1'))  await loadReclamosFromSheets();
   } catch(e) {
     console.warn('Sheets no disponible, usando datos locales');
   }
