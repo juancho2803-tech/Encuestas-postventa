@@ -2185,21 +2185,8 @@ function buildAsesores(){
     </tr>`).join('');
 }
 
-// ─── SIDEBAR ─────────────────────────────────────────────────────────────────
-function buildSidebar(agg){
-  const mLabel = filters.meses&&filters.meses.length
-    ? (filters.meses.length===1 ? MES_ORDER.find(m=>m.mes===filters.meses[0])?.label||'' : filters.meses.length+' meses')
-    : 'Dic 25 – May 26';
-  document.getElementById('s-generadas').textContent=agg.total.toLocaleString();
-  document.getElementById('s-gen-sub').textContent=agg.tasa+'% tasa · '+mLabel;
-  document.getElementById('s-respondidas').textContent=agg.completadas.toLocaleString();
-  document.getElementById('s-resp-sub').textContent='Prom: '+agg.prom+'/5';
-  const recIdx=getReclamosByMes();
-  const totalRec=filters.meses&&filters.meses.length
-    ? filters.meses.reduce((s,m)=>s+(recIdx[m]||0),0)
-    : Object.values(recIdx).reduce((s,v)=>s+v,0);
-  document.getElementById('s-reclamos').textContent=totalRec;
-}
+// ─── SIDEBAR (removida — función vacía para compatibilidad) ───────────────────
+function buildSidebar(_agg){}
 
 // ─── DONUTS ──────────────────────────────────────────────────────────────────
 function buildNPS(agg){
